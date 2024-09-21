@@ -9,7 +9,7 @@ Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
 
-//Route::middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:sanctum')->group(function () {
 
     Route::group([
         'controller' => ConversationsController::class,
@@ -17,6 +17,7 @@ Route::get('/user', function (Request $request) {
     ], function () {
         Route::get('/',  'index');
         Route::get('/{conversation}',  'show');
+        Route::put('/{conversation}/read',  'markAsRead');
         Route::post('/{conversation}/participants',  'appParticipant');
         Route::delete('/{conversation}/participants',  'removeParticipant');
     });
@@ -28,4 +29,4 @@ Route::get('/user', function (Request $request) {
         Route::delete('messages/{message_id}', 'destroy');
         Route::get('conversations/{conversation_id}/messages', 'index');
     });
-//});
+});

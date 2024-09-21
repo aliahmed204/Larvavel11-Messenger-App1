@@ -6,10 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Recipients extends Pivot
+class Recipient extends Pivot
 {
     use HasFactory, SoftDeletes;
 
+    protected $table = 'recipients';
     public $timestamps = false;
 
     protected $casts = [

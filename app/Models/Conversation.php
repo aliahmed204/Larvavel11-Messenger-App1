@@ -13,6 +13,18 @@ class Conversation extends Model
         'user_id','label', 'type','last_message_id'
     ];
 
+    public function recipients()
+    {
+        return $this->hasManyThrough(
+            Recipient::class,
+            Message::class,
+            'conversation_id',
+            'message_id',
+            'id',
+            'id'
+        );
+    }
+
     public function participants()
     {
         return $this->belongsToMany(User::class, 'participants')

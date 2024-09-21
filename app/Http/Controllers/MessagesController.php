@@ -4,8 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Events\MessageCreated;
 use App\Models\Conversation;
-use App\Models\Recipients;
+use App\Models\Recipient;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -30,7 +31,20 @@ class MessagesController extends Controller
 
         $messages = $conversation->messages()
             ->with('user')
-//            ->latest()
+            ->where(function($query) use ($user) {
+                $query
+                    ->where(function($query) use ($user) {
+                        $query->where('user_id', $user->id)
+                            ->whereNull('deleted_at');
+                    })
+                    ->orWhereRaw('id IN (
+                        SELECT message_id FROM recipients
+                        WHERE recipients.message_id = messages.id
+                        AND recipients.user_id = ?
+                        AND recipients.deleted_at IS NULL
+                    )', [$user->id]);
+            })
+            ->latest()
             ->paginate();
 
         return [
@@ -46,7 +60,7 @@ class MessagesController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'message' => ['required', 'string'],
+            'message' => ['required_without:attachment','nullable', 'string'],
             'conversation_id' => [
                 Rule::requiredIf( ! $request->has('receiver_id')),
                 'int',
@@ -61,7 +75,7 @@ class MessagesController extends Controller
         /** @var User $sender */
         /** @var Conversation $conversation */
 
-        $sender = auth()->user(); //User::find(11); //
+        $sender = auth()->user(); //User::find(11); // // //
 
         $conversation_id = $request->post('conversation_id');
         $receiver_id = $request->post('receiver_id');
@@ -71,9 +85,10 @@ class MessagesController extends Controller
         try {
 
             if ($conversation_id) {
+                // get it
                 $conversation = $sender->conversations()->findOrFail($request->conversation_id);
             }else{
-                // if no conversation id in request
+                // if no conversation id in request -> ceate new one
                 // will try to get it through sender and receiver from participants table
                 // if it is not found as peer conversation than will create new one
 
@@ -99,25 +114,49 @@ class MessagesController extends Controller
                 }
             }
 
+            $type = 'text';
+            $msg = $request->post('message');
+            if ($request->hasFile('attachment')) {
+                $file = $request->file('attachment');
+                $msg = [
+                    'file_name' => $file->getClientOriginalName(),
+                    'file_size' => $file->getSize(),
+                    'mimetype' => $file->getMimeType(),
+                    'file_path' => $file->store('attachments', [
+                        'disk' => 'public'
+                    ]),
+                ];
+                $type = 'attachment';
+            }
             $message = $conversation->messages()->create([
                 'user_id' => $sender->id, // auth user how sent message
-                'body' => $request->message,
+                'body' => $msg,
+                'type' => $type,
             ]);
             $conversation->update(['last_message_id' => $message->id]);
 
+            $message->refresh();
+
+            // recipients that will receive the message sender should not be with them
             DB::statement('
                 INSERT INTO `recipients` (`user_id`, `message_id`)
                 SELECT `user_id`, ? FROM participants
                 WHERE conversation_id = ?
-            ',[$message->id, $conversation->id]); // insert into recipients table column user_id, message_id
+                AND user_id <> ?
+            ',[$message->id, $conversation->id, $sender->id]); // insert into recipients table column user_id, message_id
             // values from select { every user in table participants for this conversation_id }
+
+            $message->load('user');
 
             broadcast(new MessageCreated($message));
 
             DB::commit();
+
+            //return response()->json($message->load('user'));
+
         }catch (\Exception $e) {
             DB::rollBack();
-            throw $e;
+            return $e;
         }
 
         return $message;
@@ -142,15 +181,36 @@ class MessagesController extends Controller
     /**
      * Remove from recipients not the message itself
      */
-    public function destroy(string $message_id)
+    public function destroy(string $message_id, Request $request)
     {
         /** @var User $user */
         // delete message from recipients table
         $user = auth()->user();
-        $user->receivedMessages()->where('message_id', $message_id)->delete();
+
+        // if I want to delete message that I sent
+        $user->sentMessages()
+            ->where('id', '=', $message_id)
+            ->update([
+                'deleted_at' => Carbon::now(),
+            ]);
+
+        if ($request->target == 'me') {
+
+            Recipient::where([
+                'user_id' => $user->id,
+                'message_id' => $message_id,
+            ])->delete();
+
+        } else {
+            // if group of users are receivers
+            Recipient::where([
+                'message_id' => $message_id,
+            ])->delete();
+        }
 
         return [
-            'message' => 'deleted'
+            'message' => 'deleted',
         ];
+
     }
 }

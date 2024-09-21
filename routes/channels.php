@@ -9,3 +9,7 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
 Broadcast::channel('Messenger.{id}', function ($user, $id) {
     return $user->id === (int) $id ? $user : false;
 });
+
+Broadcast::channel('Chat', function ($user) {
+    return $user;
+});
